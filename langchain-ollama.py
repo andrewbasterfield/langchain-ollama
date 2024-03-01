@@ -15,6 +15,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_community.embeddings import OllamaEmbeddings
+from langchain_core.prompts import ChatPromptTemplate
 
 model="llama2"
 base_url="http://localhost:11434"
@@ -39,13 +40,21 @@ print("splitted.")
 
 
 print("vectorstoring...")
-vectorstore = Chroma.from_documents(documents=splits, embedding=OllamaEmbeddings(model=model, base_url=base_url))
+vectorstore = Chroma.from_documents(documents=splits, embedding=OllamaEmbeddings(model=model, base_url=base_url), persist_directory="./chroma_db")
 print("vectorstored.")
 
 retriever = vectorstore.as_retriever()
 #retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 6})
-prompt = hub.pull("rlm/rag-prompt")
-#print(prompt)
+
+#prompt = hub.pull("rlm/rag-prompt")
+
+template = """You are an assistant for question-answering tasks. Use only the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
+Question: {question} 
+Context: {context} 
+Answer:
+"""
+prompt = ChatPromptTemplate.from_template(template)
+print(prompt)
 
 llm = Ollama(model=model, base_url=base_url)
 
