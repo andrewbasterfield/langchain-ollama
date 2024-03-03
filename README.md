@@ -1,11 +1,26 @@
+Prerequisites
+-------------
+* [direnv](https://direnv.net/)
+
+Mac instructions
+----------------
+```sh
+brew install ollama
+/path/to/bin/ollama serve # or: `brew services start ollama` in the background
+```
+Maybe in another terminal
+```sh
+ollama pull zephyr # get zephyr llm
+ollama run zephyr # test it runs
+```
+
 Linux instructions
 ------------------
-
 We need a data directory for ollama persistent state
 ```sh
 mkdir data
 ```
-Test we have access to the GPU in docker
+Test we have access to nvidia GPUs in docker
 ```sh
 docker run --rm --gpus=all ubuntu nvidia-smi
 ```
