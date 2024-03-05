@@ -7,6 +7,7 @@
 # https://api.python.langchain.com/en/latest/llms/langchain_community.llms.ollama.Ollama.html
 
 import logging
+from typing import TYPE_CHECKING, Any, Optional, List, LiteralString
 
 # main
 from langchain_community.llms import Ollama
@@ -26,11 +27,15 @@ import bs4
 from langchain_community.document_loaders import WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_text_splitters import TokenTextSplitter
+from langchain_core.documents import Document
+from langchain_core.vectorstores import VectorStore
+
 
 # get_retriever
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma, LanceDB
 
-def get_prompt_hub(llama: bool):
+
+def get_prompt_hub(llama: bool) -> Any:
     if llama:
         prompt = hub.pull("rlm/rag-prompt-llama")
     else:
@@ -38,7 +43,7 @@ def get_prompt_hub(llama: bool):
     return prompt
 
 
-def get_prompt_local(llama: bool):
+def get_prompt_local(llama: bool) -> ChatPromptTemplate:
     if llama:
         template = """[INST]<<SYS>> You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.<</SYS>> 
 Question: {question} 
@@ -55,7 +60,7 @@ Answer: [/INST]
     return prompt
 
 
-def get_documents(web_path,embeddings=None):
+def get_documents(web_path,model_name,embeddings=None) -> List[Document]:
     # Only keep post title, headers, and content from the full HTML.
     #bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header", "post-content"))
     #bs4_strainer = bs4.SoupStrainer()
@@ -67,65 +72,101 @@ def get_documents(web_path,embeddings=None):
     logging.info("Loading & Splitting %s...",web_path)
     docs = loader.load()
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=100, add_start_index=True)
+    #text_splitter = RecursiveCharacterTextSplitter(separators=["\n\n", "\n"], chunk_size=1000, chunk_overlap=250, add_start_index=False)
     #text_splitter = TokenTextSplitter(chunk_size=1000, chunk_overlap=100)
     #text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=100)
     #text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=100)
+    #text_splitter = TokenTextSplitter.from_tiktoken_encoder(model_name=model_name, chunk_size=1000, chunk_overlap=100)
 
-    #from langchain.text_splitter import NLTKTextSplitter
-    #text_splitter = NLTKTextSplitter(chunk_size=1000, chunk_overlap=100, add_start_index=True)
+    from langchain.text_splitter import NLTKTextSplitter
+    text_splitter = NLTKTextSplitter(chunk_size=1000, chunk_overlap=100, add_start_index=True)
     
-    #from langchain.text_splitter import SpacyTextSplitter    
+    #from langchain.text_splitter import SpacyTextSplitter
+    #text_splitter = SpacyTextSplitter(max_length=100000)
     #text_splitter = SpacyTextSplitter(max_length=1500000, pipeline="sentencizer")
     
     #from langchain_experimental.text_splitter import SemanticChunker
     #text_splitter = SemanticChunker(embeddings)
 
-    
-    splits = text_splitter.split_documents(docs)
+    split_docs = text_splitter.split_documents(docs)
     logging.info("Loaded & Splitted.")
-    return splits
+    return split_docs
 
-
-def get_retriever_chroma(embeddings, documents=None):
-    directory = "./chroma_db/"
+def get_vectorstore_chroma(embeddings, documents=None, directory = "./chroma_db/") -> VectorStore:    
     if documents is None:
-        logging.info("Attempting to instantiate vector store from %s...", directory)
+        logging.info("Attempting to instantiate chroma vector store from %s...", directory)
         vectorstore = Chroma(embedding_function=embeddings,
                              persist_directory=directory)
     else:
-        logging.info("Attempting to instantiate vector store (with documents) from %s...", directory)
+        logging.info("Attempting to instantiate chroma vector store (with documents) from %s...", directory)
         vectorstore = Chroma.from_documents(documents=documents,
                                             embedding=embeddings,
                                             persist_directory=directory)
     logging.info("Instantiated vectorstore.")
 
-    #return vectorstore.as_retriever()
-    #return vectorstore.as_retriever(search_type="mmr")
-    return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 6})
-    #return vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.5}) # not working
+def get_lancedb_table(db,embeddings) -> Any:
+    import pyarrow as pa
 
-def multi_query_retriever_wrapper(retriever,llm):
+
+    try:
+        tbl = db.open_table("vectorstore")
+    except:
+        schema = pa.schema(
+            [
+                pa.field(
+                    "vector",
+                    pa.list_(
+                        pa.float32(),
+                        len(embeddings.embed_query("test")),  # type: ignore
+                    ),
+                ),
+                pa.field("id", pa.string()),
+                pa.field("text", pa.string()),
+            ]
+        )
+
+        tbl = db.create_table("vectorstore", schema=schema, exist_ok=True)
+    return tbl
+
+def get_vectorstore_lancedb(embeddings, documents=None, directory = "./lancedb/") -> VectorStore:
+
+    import lancedb
+    db = lancedb.connect(directory)
+    tbl = get_lancedb_table(db,embeddings)
+
+    if documents is None:
+        logging.info("Attempting to instantiate lancedb vector store from %s...", directory)
+        vectorstore = LanceDB(embedding=embeddings,
+                             connection=tbl)
+    else:
+        logging.info("Attempting to instantiate lancedb vector store (with documents) from %s...", directory)
+        vectorstore = LanceDB.from_documents(documents=documents,
+                                            embedding=embeddings,
+                                            connection=tbl)
+    logging.info("Instantiated vectorstore.")
+    return vectorstore
+
+def multi_query_retriever_wrapper(retriever,llm) -> Any:
     from langchain.retrievers.multi_query import MultiQueryRetriever
     return MultiQueryRetriever.from_llm(
         retriever=retriever, llm=llm
     )
 
-def embeddings_filter_retriever_wrapper(retriever,embeddings):
+def embeddings_filter_retriever_wrapper(retriever,embeddings) -> Any:
     from langchain.retrievers.document_compressors import EmbeddingsFilter
     from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
     return ContextualCompressionRetriever(
         base_compressor=EmbeddingsFilter(embeddings=embeddings, similarity_threshold=0.76), base_retriever=retriever
     )
 
-def format_docs(docs):
+def format_docs(docs) -> LiteralString:
     return "\n\n".join(doc.page_content for doc in docs)
 
 def main(args):
     import re
     ingest = False
     query = False
-    temperature = 0
+    temperature : int = 0
     model = "zephyr"
     base_url = "http://localhost:11434"
     log_level = "info"
@@ -156,27 +197,34 @@ def main(args):
     embeddings = OllamaEmbeddings(model=model, base_url=base_url)
 
     if ingest:
-        logging.warning("Building chroma from documents")
+        logging.warning("Instantiating vectorstore from documents")
         for web_path in sys.stdin:
-            print("Web path: "+web_path)
-            retriever = get_retriever_chroma(embeddings, documents=get_documents(web_path,embeddings))
+            print("Web path: "+web_path.strip())
+            vectorstore = get_vectorstore_lancedb(embeddings, documents=get_documents(web_path.strip(),model,embeddings))
     else:
-        logging.warning("Building chroma without documents")
-        retriever = get_retriever_chroma(embeddings)
+        logging.warning("Instantiating vectorstore without documents")
+        vectorstore = get_vectorstore_lancedb(embeddings)
+    
+    #retriever = vectorstore.as_retriever() # similarity
+    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 6})
+    #retriever = vectorstore.as_retriever(search_type="mmr")
+    #retriever = vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.5}) # not working
+
     
     #retriever = embeddings_filter_retriever_wrapper(retriever,embeddings)
 
     if query:
 
+
         docs = retriever.get_relevant_documents(query)
         import pprint
         for doc in docs:
-            print("***doc***")
-            pprint.pprint(doc)
-            print("***end***")
+            #pprint.pprint(doc.page_content)
+            print("Content: %s",doc.page_content)
 
-        prompt = get_prompt_local(False)
+        prompt = get_prompt_local(True)
         llm = Ollama(model=model, base_url=base_url, temperature=temperature)
+        #retriever = multi_query_retriever_wrapper(retriever=retriever,llm=llm)
         rag_chain = (
                 {"context": retriever | format_docs, "question": RunnablePassthrough()}
                 | prompt
@@ -186,7 +234,6 @@ def main(args):
 
         logging.info("Invoking chain...")
         result = rag_chain.invoke(query)
-        #pprint.pprint(result)
         print(result)
 
 
