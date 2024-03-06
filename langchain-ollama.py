@@ -20,7 +20,9 @@ from langchain_community.llms import Ollama
 # get_retriever
 from langchain_community.vectorstores import Chroma, LanceDB, FAISS
 from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.vectorstores import VectorStore
 
 
@@ -70,30 +72,13 @@ def get_documents(path, model_name, embeddings=None) -> List[Document]:
                                                    chunk_overlap=100,
                                                    length_function=len,
                                                    add_start_index=False)
-    # text_splitter = TokenTextSplitter(chunk_size=1000, chunk_overlap=100)
-    # text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=100)
-    # text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=100)
-    # text_splitter = TokenTextSplitter.from_tiktoken_encoder(model_name=model_name, chunk_size=1000, chunk_overlap=100)
-
-    # from langchain.text_splitter import NLTKTextSplitter
-    # text_splitter = NLTKTextSplitter(chunk_size=1000, chunk_overlap=100, add_start_index=True)
-
-    # from langchain.text_splitter import SpacyTextSplitter
-    # text_splitter = SpacyTextSplitter(max_length=100000)
-    # text_splitter = SpacyTextSplitter(max_length=1500000, pipeline="sentencizer")
-
-    # from langchain_experimental.text_splitter import SemanticChunker
-    # text_splitter = SemanticChunker(embeddings)
 
     split_docs = text_splitter.split_documents(docs)
     logging.info("Loaded & Splitted.")
     return split_docs
 
 
-def get_vectorstore_chroma(embeddings, documents=None,
-                           directory=None) -> VectorStore:
-    if directory is None:
-        directory = "./chroma_db/"
+def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> VectorStore:
 
     if documents is None:
         logging.info("Attempting to instantiate chroma vector store from %s...",
@@ -113,77 +98,6 @@ def get_vectorstore_chroma(embeddings, documents=None,
     return vectorstore
 
 
-def get_lancedb_table(db, embeddings) -> Any:
-    import pyarrow as pa
-
-    try:
-        tbl = db.open_table("vectorstore")
-    except:
-        schema = pa.schema(
-            [
-                pa.field(
-                    "vector",
-                    pa.list_(
-                        pa.float32(),
-                        len(embeddings.embed_query("test")),  # type: ignore
-                    ),
-                ),
-                pa.field("id", pa.string()),
-                pa.field("text", pa.string()),
-            ]
-        )
-
-        tbl = db.create_table("vectorstore", schema=schema, exist_ok=True)
-    return tbl
-
-
-def get_vectorstore_lancedb(embeddings, documents=None,
-                            directory=None) -> VectorStore:
-    if directory is None:
-        directory = "./lancedb/"
-
-    import lancedb
-    db = lancedb.connect(directory)
-    tbl = get_lancedb_table(db, embeddings)
-
-    if documents is None:
-        logging.info("Attempting to instantiate lancedb vector store from %s...",
-                     directory)
-        vectorstore = LanceDB(embedding=embeddings,
-                              connection=tbl)
-    else:
-        logging.info(
-            "Attempting to instantiate lancedb vector store (with documents) from %s...",
-            directory)
-        vectorstore = LanceDB.from_documents(documents=documents,
-                                             embedding=embeddings,
-                                             connection=tbl)
-    logging.info("Instantiated vectorstore.")
-    return vectorstore
-
-
-def get_vectorstore_faiss(embeddings, documents=None, directory=None) -> FAISS:
-    if directory is None:
-        directory = "./FAISS"
-
-    try:
-        print("FAISS: Loading from disk")
-        db = FAISS.load_local(folder_path=directory, embeddings=embeddings)
-    except:
-        print("FAISS: Loading in memory")
-        db = FAISS.from_texts(texts=[""], embedding=embeddings)
-
-    if documents is not None:
-        db.add_documents(documents)
-
-    db.save_local(directory)
-    return db
-
-
-def get_vectorstore(embeddings, documents=None, directory=None) -> VectorStore:
-    return get_vectorstore_chroma(embeddings=embeddings, documents=documents, directory=directory)
-
-
 def multi_query_retriever_wrapper(retriever, llm) -> Any:
     from langchain.retrievers.multi_query import MultiQueryRetriever
     return MultiQueryRetriever.from_llm(
@@ -191,13 +105,13 @@ def multi_query_retriever_wrapper(retriever, llm) -> Any:
     )
 
 
-def embeddings_filter_retriever_wrapper(retriever, embeddings) -> Any:
+def embeddings_filter_retriever_wrapper(retriever, embeddings, similarity_threshold=0.6) -> Any:
     from langchain.retrievers.document_compressors import EmbeddingsFilter
     from langchain.retrievers.contextual_compression import \
         ContextualCompressionRetriever
     return ContextualCompressionRetriever(
         base_compressor=EmbeddingsFilter(embeddings=embeddings,
-                                         similarity_threshold=0.76),
+                                         similarity_threshold=similarity_threshold),
         base_retriever=retriever
     )
 
@@ -206,13 +120,18 @@ def format_docs(docs) -> LiteralString:
     return "\n\n".join(doc.page_content for doc in docs)
 
 
+def get_metadata(docs) -> LiteralString:
+    return "\n".join(doc.metadata["source"] for doc in docs)
+
+
 def main(args):
     import re
     ingest = False
     query = False
     temperature: int = 0
-    # model = "llama2:7b"
-    model = "mistral:7b"
+    embeddings_model = "nomic-embed-text"
+    model = "llama2:7b"
+    # model = "mistral:7b"
     base_url = "http://localhost:11434"
     log_level = "info"
 
@@ -239,10 +158,10 @@ def main(args):
 
     logging.basicConfig(level=getattr(logging, log_level.upper()))
     from langchain.globals import set_debug, set_verbose
-    set_verbose(True)
-    set_debug(True)
+    set_verbose(False)
+    set_debug(False)
 
-    embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=base_url)
+    embeddings = OllamaEmbeddings(model=embeddings_model, base_url=base_url)
 
     if ingest:
         logging.warning("Adding documents to vectorstore")
@@ -254,30 +173,36 @@ def main(args):
         logging.warning("Instantiating vectorstore without documents")
         vectorstore = get_vectorstore(embeddings=embeddings)
 
-    # retriever: VectorStoreRetriever = vectorstore.as_retriever()
-    # retriever: VectorStoreRetriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     retriever = vectorstore.as_retriever(search_type="mmr")
-    # retriever = vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.0})
 
     if query:
-        prompt: ChatPromptTemplate = get_prompt_local(llama=False, question="input")
+        prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in model))
         llm = Ollama(model=model, base_url=base_url, temperature=temperature)
+        # retriever = multi_query_retriever_wrapper(retriever, llm)
+        # retriever = embeddings_filter_retriever_wrapper(retriever, embeddings, similarity_threshold=0.6)
 
         docs = retriever.get_relevant_documents(query=query)
         for doc in docs:
-            logging.info(doc)
+            logging.debug(doc)
         if len(docs) == 0:
+            logging.warning("No context docs, exiting")
             exit(0)
 
-        from langchain.chains.combine_documents import create_stuff_documents_chain
-        document_chain = create_stuff_documents_chain(llm, prompt)
+        rag_chain_from_docs = (
+                RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
+                | prompt
+                | llm
+                | StrOutputParser()
+        )
 
-        from langchain.chains import create_retrieval_chain
-        rag_chain = create_retrieval_chain(retriever, document_chain)
+        rag_chain_with_source = RunnableParallel(
+            {"context": retriever, "question": RunnablePassthrough()}
+        ).assign(answer=rag_chain_from_docs)
 
         logging.info("Invoking chain...")
-        result = rag_chain.invoke({"input": query})
+        result = rag_chain_with_source.invoke(query)
         logging.info(result["answer"])
+        logging.info("\n".join(doc.metadata["source"] for doc in result["context"]))
 
 
 if __name__ == '__main__':
