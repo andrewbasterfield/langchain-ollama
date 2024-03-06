@@ -7,30 +7,21 @@
 # https://api.python.langchain.com/en/latest/llms/langchain_community.llms.ollama.Ollama.html
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, List, LiteralString
-
-# main
-from langchain_community.llms import Ollama
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_core.output_parsers import StrOutputParser
-from langchain.text_splitter import SpacyTextSplitter
-from langchain.text_splitter import CharacterTextSplitter
+from typing import Any, List, LiteralString
 
 # get_prompt
 from langchain import hub
-from langchain_core.prompts import ChatPromptTemplate
-
-# get_documents
-import bs4
-from langchain_community.document_loaders import WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_text_splitters import TokenTextSplitter
-from langchain_core.documents import Document
-from langchain_core.vectorstores import VectorStore
-
+# get_documents
+from langchain_community.document_loaders import WebBaseLoader, TextLoader
+from langchain_community.embeddings import OllamaEmbeddings
+# main
+from langchain_community.llms import Ollama
 # get_retriever
 from langchain_community.vectorstores import Chroma, LanceDB, FAISS
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.vectorstores import VectorStore
 
 
 def get_prompt_hub(llama: bool) -> Any:
@@ -41,33 +32,38 @@ def get_prompt_hub(llama: bool) -> Any:
     return prompt
 
 
-def get_prompt_local(llama: bool) -> ChatPromptTemplate:
+def get_prompt_local(llama: bool, question: object = "question") -> ChatPromptTemplate:
     if llama:
         template = """[INST]<<SYS>> You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.<</SYS>> 
-Question: {question} 
+Question: {$question} 
 Context: {context} 
 Answer:
 """
     else:
         template = """You are an assistant for question-answering tasks. Use only the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
-Question: {question} 
+Question: {$question} 
 Context: {context} 
 Answer: [/INST]
 """
-    prompt = ChatPromptTemplate.from_template(template)
+    from string import Template
+    prompt = ChatPromptTemplate.from_template(Template(template).substitute({"question": question}))
     return prompt
 
 
-def get_documents(web_path, model_name, embeddings=None) -> List[Document]:
+def get_documents(path, model_name, embeddings=None) -> List[Document]:
     # Only keep post title, headers, and content from the full HTML.
     # bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header",
     # "post-content")) bs4_strainer = bs4.SoupStrainer()
 
-    loader = WebBaseLoader(
-        web_paths=(web_path,),
-        # bs_kwargs={"parse_only": bs4_strainer},
-    )
-    logging.info("Loading & Splitting %s...", web_path)
+    if path.startswith("http://") or path.startswith("https://"):
+        loader = WebBaseLoader(
+            web_paths=(path,),
+            # bs_kwargs={"parse_only": bs4_strainer},
+        )
+    else:
+        loader = TextLoader(path, autodetect_encoding=True)
+
+    logging.info("Loading & Splitting %s...", path)
     docs = loader.load()
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
@@ -103,14 +99,16 @@ def get_vectorstore_chroma(embeddings, documents=None,
         logging.info("Attempting to instantiate chroma vector store from %s...",
                      directory)
         vectorstore = Chroma(embedding_function=embeddings,
-                             persist_directory=directory)
+                             persist_directory=directory,
+                             collection_metadata={"hnsw:space": "cosine"})
     else:
         logging.info(
             "Attempting to instantiate chroma vector store (with documents) from %s...",
             directory)
         vectorstore = Chroma.from_documents(documents=documents,
                                             embedding=embeddings,
-                                            persist_directory=directory)
+                                            persist_directory=directory,
+                                            collection_metadata={"hnsw:space": "cosine"})
     logging.info("Instantiated vectorstore.")
     return vectorstore
 
@@ -183,7 +181,7 @@ def get_vectorstore_faiss(embeddings, documents=None, directory=None) -> FAISS:
 
 
 def get_vectorstore(embeddings, documents=None, directory=None) -> VectorStore:
-    return get_vectorstore_chroma(embeddings, documents, directory)
+    return get_vectorstore_chroma(embeddings=embeddings, documents=documents, directory=directory)
 
 
 def multi_query_retriever_wrapper(retriever, llm) -> Any:
@@ -213,7 +211,8 @@ def main(args):
     ingest = False
     query = False
     temperature: int = 0
-    model = "llama2:7b"
+    # model = "llama2:7b"
+    model = "mistral:7b"
     base_url = "http://localhost:11434"
     log_level = "info"
 
@@ -239,53 +238,46 @@ def main(args):
         exit(1)
 
     logging.basicConfig(level=getattr(logging, log_level.upper()))
+    from langchain.globals import set_debug, set_verbose
+    set_verbose(True)
+    set_debug(True)
 
-    embeddings = OllamaEmbeddings(model=model, base_url=base_url)
+    embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=base_url)
 
     if ingest:
         logging.warning("Adding documents to vectorstore")
         for web_path in sys.stdin:
             print("Web path: " + web_path.strip())
             docs = get_documents(web_path.strip(), model, embeddings)
-            vectorstore = get_vectorstore(embeddings, docs)
+            vectorstore = get_vectorstore(embeddings=embeddings, documents=docs)
     else:
         logging.warning("Instantiating vectorstore without documents")
-        vectorstore = get_vectorstore(embeddings)
+        vectorstore = get_vectorstore(embeddings=embeddings)
 
-    # retriever = vectorstore.as_retriever() # similarity
-    retriever = vectorstore.as_retriever(search_type="similarity",
-                                         search_kwargs={"k": 4})
-    # retriever = vectorstore.as_retriever(search_type="mmr")
-    # retriever = vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.5}) # not working
-    # retriever = embeddings_filter_retriever_wrapper(retriever,embeddings)
+    # retriever: VectorStoreRetriever = vectorstore.as_retriever()
+    # retriever: VectorStoreRetriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    retriever = vectorstore.as_retriever(search_type="mmr")
+    # retriever = vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.0})
 
     if query:
-        prompt: ChatPromptTemplate = get_prompt_local(llama=True)
+        prompt: ChatPromptTemplate = get_prompt_local(llama=False, question="input")
         llm = Ollama(model=model, base_url=base_url, temperature=temperature)
-        # retriever = multi_query_retriever_wrapper(retriever=retriever,llm=llm)
 
-        docs = retriever.get_relevant_documents(query)
-        # docs = vectorstore.similarity_search(query)
-
-        logging.info("Found " + str(len(docs)) + " docs")
-        i = 0
+        docs = retriever.get_relevant_documents(query=query)
         for doc in docs:
-            logging.info("******** Start: " + str(i) + " ********")
-            logging.info(doc.page_content)
-            logging.info("******** Finish: " + str(i) + " ********")
-            i += 1
+            logging.info(doc)
+        if len(docs) == 0:
+            exit(0)
 
-        tokens = llm.get_num_tokens(format_docs(docs))
-        logging.info("Found " + str(tokens) + " tokens")
+        from langchain.chains.combine_documents import create_stuff_documents_chain
+        document_chain = create_stuff_documents_chain(llm, prompt)
 
-        rag_chain = (
-                RunnableParallel({"context": retriever | format_docs,
-                                  "question": RunnablePassthrough()}) | prompt | llm | StrOutputParser()
-        )
+        from langchain.chains import create_retrieval_chain
+        rag_chain = create_retrieval_chain(retriever, document_chain)
 
         logging.info("Invoking chain...")
-        result = rag_chain.invoke(query)
-        logging.info(result)
+        result = rag_chain.invoke({"input": query})
+        logging.info(result["answer"])
 
 
 if __name__ == '__main__':
