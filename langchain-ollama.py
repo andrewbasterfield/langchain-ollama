@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional, List, LiteralString
 
 # main
 from langchain_community.llms import Ollama
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain.text_splitter import SpacyTextSplitter
@@ -32,7 +32,7 @@ from langchain_core.vectorstores import VectorStore
 
 
 # get_retriever
-from langchain_community.vectorstores import Chroma, LanceDB
+from langchain_community.vectorstores import Chroma, LanceDB, FAISS
 
 
 def get_prompt_hub(llama: bool) -> Any:
@@ -72,14 +72,14 @@ def get_documents(web_path,model_name,embeddings=None) -> List[Document]:
     logging.info("Loading & Splitting %s...",web_path)
     docs = loader.load()
 
-    #text_splitter = RecursiveCharacterTextSplitter(separators=["\n\n", "\n"], chunk_size=1000, chunk_overlap=250, add_start_index=False)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100, length_function=len, add_start_index=False)
     #text_splitter = TokenTextSplitter(chunk_size=1000, chunk_overlap=100)
     #text_splitter = CharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=100)
     #text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=1000, chunk_overlap=100)
     #text_splitter = TokenTextSplitter.from_tiktoken_encoder(model_name=model_name, chunk_size=1000, chunk_overlap=100)
 
-    from langchain.text_splitter import NLTKTextSplitter
-    text_splitter = NLTKTextSplitter(chunk_size=1000, chunk_overlap=100, add_start_index=True)
+    #from langchain.text_splitter import NLTKTextSplitter
+    #text_splitter = NLTKTextSplitter(chunk_size=1000, chunk_overlap=100, add_start_index=True)
     
     #from langchain.text_splitter import SpacyTextSplitter
     #text_splitter = SpacyTextSplitter(max_length=100000)
@@ -92,7 +92,10 @@ def get_documents(web_path,model_name,embeddings=None) -> List[Document]:
     logging.info("Loaded & Splitted.")
     return split_docs
 
-def get_vectorstore_chroma(embeddings, documents=None, directory = "./chroma_db/") -> VectorStore:    
+def get_vectorstore_chroma(embeddings, documents=None, directory = None) -> VectorStore:
+    if directory is None:
+        directory = "./chroma_db/"
+
     if documents is None:
         logging.info("Attempting to instantiate chroma vector store from %s...", directory)
         vectorstore = Chroma(embedding_function=embeddings,
@@ -103,6 +106,7 @@ def get_vectorstore_chroma(embeddings, documents=None, directory = "./chroma_db/
                                             embedding=embeddings,
                                             persist_directory=directory)
     logging.info("Instantiated vectorstore.")
+    return vectorstore
 
 def get_lancedb_table(db,embeddings) -> Any:
     import pyarrow as pa
@@ -128,7 +132,10 @@ def get_lancedb_table(db,embeddings) -> Any:
         tbl = db.create_table("vectorstore", schema=schema, exist_ok=True)
     return tbl
 
-def get_vectorstore_lancedb(embeddings, documents=None, directory = "./lancedb/") -> VectorStore:
+def get_vectorstore_lancedb(embeddings, documents=None, directory = None) -> VectorStore:
+
+    if directory is None:
+        directory = "./lancedb/"
 
     import lancedb
     db = lancedb.connect(directory)
@@ -145,6 +152,27 @@ def get_vectorstore_lancedb(embeddings, documents=None, directory = "./lancedb/"
                                             connection=tbl)
     logging.info("Instantiated vectorstore.")
     return vectorstore
+
+def get_vectorstore_faiss(embeddings, documents=None, directory=None) -> FAISS:
+
+    if directory is None:
+        directory = "./FAISS"
+
+    try:
+        print("FAISS: Loading from disk")
+        db = FAISS.load_local(folder_path=directory, embeddings=embeddings)
+    except:
+        print("FAISS: Loading in memory")
+        db = FAISS.from_texts(texts=[""], embedding=embeddings)
+    
+    if documents is not None:
+        db.add_documents(documents)
+    
+    db.save_local(directory)
+    return db
+
+def get_vectorstore(embeddings, documents=None, directory=None) -> VectorStore:
+    return get_vectorstore_chroma(embeddings, documents, directory)
 
 def multi_query_retriever_wrapper(retriever,llm) -> Any:
     from langchain.retrievers.multi_query import MultiQueryRetriever
@@ -167,7 +195,7 @@ def main(args):
     ingest = False
     query = False
     temperature : int = 0
-    model = "zephyr"
+    model = "llama2:7b"
     base_url = "http://localhost:11434"
     log_level = "info"
 
@@ -197,44 +225,48 @@ def main(args):
     embeddings = OllamaEmbeddings(model=model, base_url=base_url)
 
     if ingest:
-        logging.warning("Instantiating vectorstore from documents")
+        logging.warning("Adding documents to vectorstore")
         for web_path in sys.stdin:
             print("Web path: "+web_path.strip())
-            vectorstore = get_vectorstore_lancedb(embeddings, documents=get_documents(web_path.strip(),model,embeddings))
+            docs = get_documents(web_path.strip(),model,embeddings)
+            vectorstore = get_vectorstore(embeddings,docs)
     else:
         logging.warning("Instantiating vectorstore without documents")
-        vectorstore = get_vectorstore_lancedb(embeddings)
+        vectorstore = get_vectorstore(embeddings)
     
     #retriever = vectorstore.as_retriever() # similarity
-    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 6})
+    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 4})
     #retriever = vectorstore.as_retriever(search_type="mmr")
     #retriever = vectorstore.as_retriever(search_type="similarity_score_threshold", search_kwargs={"score_threshold": 0.5}) # not working
-
-    
     #retriever = embeddings_filter_retriever_wrapper(retriever,embeddings)
 
     if query:
+        prompt : ChatPromptTemplate = get_prompt_local(llama=True)
+        llm = Ollama(model=model, base_url=base_url, temperature=temperature)
+        #retriever = multi_query_retriever_wrapper(retriever=retriever,llm=llm)
 
 
         docs = retriever.get_relevant_documents(query)
-        import pprint
-        for doc in docs:
-            #pprint.pprint(doc.page_content)
-            print("Content: %s",doc.page_content)
+        #docs = vectorstore.similarity_search(query)
 
-        prompt = get_prompt_local(True)
-        llm = Ollama(model=model, base_url=base_url, temperature=temperature)
-        #retriever = multi_query_retriever_wrapper(retriever=retriever,llm=llm)
+        logging.info("Found "+str(len(docs))+" docs")
+        i=0
+        for doc in docs:
+            logging.info("******** Start: "+str(i)+" ********")
+            logging.info(doc.page_content)
+            logging.info("******** Finish: "+str(i)+" ********")
+            i+=1
+
+        tokens = llm.get_num_tokens(format_docs(docs))
+        logging.info("Found "+str(tokens)+" tokens")
+
         rag_chain = (
-                {"context": retriever | format_docs, "question": RunnablePassthrough()}
-                | prompt
-                | llm
-                | StrOutputParser()
+            RunnableParallel({"context": retriever | format_docs, "question": RunnablePassthrough()}) | prompt| llm | StrOutputParser()
         )
 
         logging.info("Invoking chain...")
         result = rag_chain.invoke(query)
-        print(result)
+        logging.info(result)
 
 
 if __name__ == '__main__':
