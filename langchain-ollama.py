@@ -147,6 +147,7 @@ def main(args):
         print("\t--log-level=<debug|info|warning>\tLog level (default: \"" + log_level + "\")", file=file)
         print("\t--langchain-verbose\t\t\tenable langchain verbose mode", file=file)
         print("\t--langchain-debug\t\t\tenable langchain debug mode", file=file)
+        print("\t--sources\t\t\t\tprint locations of sources used as context", file=file)
         print("Examples:", file=file)
         print("\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | "+args[0]+" --ingest`", file=file)
         print("\tquery:\t`" + args[0] + " --query=\"What is 802.1X?\"`", file=file)

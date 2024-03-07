@@ -5,7 +5,8 @@ Perform RAG (Retrieval Augmented Generation) from the corpus of content.
 
 Prerequisites
 -------------
-* Only tested with an NVIDIA CUDA card with at least 6GB of RAM
+* Tested on Linux with an NVIDIA CUDA-capable card with at least 6GB of RAM
+* Tested on M2 Mac 32GB
 * [direnv](https://direnv.net/)
 
 Mac-specific setup instructions
@@ -14,10 +15,11 @@ Mac-specific setup instructions
 $ brew install ollama
 $ /path/to/bin/ollama serve # or: `brew services start ollama` in the background
 ```
-Maybe in another terminal
+Maybe in another terminal if necessary
 ```sh
 $ ollama pull llama2:7b # get model
 $ ollama run llama2:7b # test it runs
+$ ollama pull nomic-embed-text # to generate our embeddings
 ```
 
 Linux-specific instructions
@@ -42,7 +44,9 @@ Pull a LLM & test it
 ```sh
 $ docker exec -it ollama ollama pull llama2:7b
 $ docker exec -it ollama ollama run llama2:7b # test it out
+$ docker exec -it ollama ollama pull nomic-embed-text # to generate our embeddings
 ```
+
 General setup
 -------------
 ```shell
@@ -65,8 +69,14 @@ Usage: ./langchain-ollama.py
 	--log-level=<debug|info|warning>	Log level (default: "info")
 	--langchain-verbose			enable langchain verbose mode
 	--langchain-debug			enable langchain debug mode
+	--sources				print locations of sources used as context
 Examples:
 	ingest:	`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | ./langchain-ollama.py --ingest`
 	query:	`./langchain-ollama.py --query="What is 802.1X?"`
-
+$ cd training
+$ ./fetch.sh # pulls down the Linux documentation project in plaintext, approx 35M
+$ cd ..
+$ ls training/*.txt | ./langchain-ollama.py --ingest
+...
+$ ./langchain-ollama.py --query="What is NIS+?" --sources
 ```
