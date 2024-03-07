@@ -81,20 +81,20 @@ def get_documents(path, model_name, embeddings=None) -> List[Document]:
 def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> VectorStore:
 
     if documents is None:
-        logging.info("Attempting to instantiate chroma vector store from %s...",
+        logging.debug("Attempting to instantiate chroma vector store from %s...",
                      directory)
         vectorstore = Chroma(embedding_function=embeddings,
                              persist_directory=directory,
                              collection_metadata={"hnsw:space": "cosine"})
     else:
-        logging.info(
+        logging.debug(
             "Attempting to instantiate chroma vector store (with documents) from %s...",
             directory)
         vectorstore = Chroma.from_documents(documents=documents,
                                             embedding=embeddings,
                                             persist_directory=directory,
                                             collection_metadata={"hnsw:space": "cosine"})
-    logging.info("Instantiated vectorstore.")
+    logging.debug("Instantiated vectorstore.")
     return vectorstore
 
 
@@ -120,7 +120,7 @@ def format_docs(docs) -> LiteralString:
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def get_metadata(docs) -> LiteralString:
+def get_metadata_source(docs) -> LiteralString:
     return "\n".join(doc.metadata["source"] for doc in docs)
 
 
@@ -131,11 +131,27 @@ def main(args):
     temperature: int = 0
     embeddings_model = "nomic-embed-text"
     model = "llama2:7b"
-    # model = "mistral:7b"
     base_url = "http://localhost:11434"
     log_level = "info"
+    langchain_verbose = False
+    langchain_debug = False
+    sources = False
 
-    for arg in args:
+    def usage(file=sys.stdout):
+        print("Usage: "+(args[0]), file=file)
+        print("\t--ingest\t\t\t\tread data locations line by line from STDIN and ingest", file=file)
+        print("\t--query=<query>\t\t\t\tquery to ask model", file=file)
+        print("\t--temperature=N\t\t\t\tmodel temperature for query (default: 0)", file=file)
+        print("\t--model=<model>\t\t\t\tmodel (default: \""+model+"\")", file=file)
+        print("\t--base-url=<base-url>\t\t\tURL for Ollama API (default: \"" + base_url + "\")", file=file)
+        print("\t--log-level=<debug|info|warning>\tLog level (default: \"" + log_level + "\")", file=file)
+        print("\t--langchain-verbose\t\t\tenable langchain verbose mode", file=file)
+        print("\t--langchain-debug\t\t\tenable langchain debug mode", file=file)
+        print("Examples:", file=file)
+        print("\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | "+args[0]+" --ingest`", file=file)
+        print("\tquery:\t`" + args[0] + " --query=\"What is 802.1X?\"`", file=file)
+
+    for arg in args[1:]:
         if arg == "--ingest":
             ingest = True
         elif re.match("--query=(.+)$", arg):
@@ -148,29 +164,44 @@ def main(args):
             base_url = re.findall("--base-url=(\\S+)", arg)[0]
         elif re.match("--log-level=(\\w+)", arg):
             log_level = re.findall("--log-level=(\\w+)", arg)[0]
+        elif arg == "--langchain-verbose":
+            langchain_verbose = True
+        elif arg == "--langchain-debug":
+            langchain_debug = True
+        elif arg == "--sources":
+            sources = True
+        elif arg == "--help":
+            usage()
+            exit(0)
         else:
-            print("Unknown argument")
+            print("Unknown argument: "+arg, file=sys.stderr)
+            usage(sys.stderr)
             exit(1)
 
     if (not ingest) and (not query):
-        print("Need at least one of --ingest or --query")
+        print("Need at least one of --ingest or --query", file=sys.stderr)
+        usage(sys.stderr)
         exit(1)
 
     logging.basicConfig(level=getattr(logging, log_level.upper()))
     from langchain.globals import set_debug, set_verbose
-    set_verbose(False)
-    set_debug(False)
+
+    if langchain_verbose:
+        set_verbose(False)
+
+    if langchain_debug:
+        set_debug(False)
 
     embeddings = OllamaEmbeddings(model=embeddings_model, base_url=base_url)
 
     if ingest:
-        logging.warning("Adding documents to vectorstore")
+        logging.debug("Adding documents to vectorstore")
         for web_path in sys.stdin:
             print("Web path: " + web_path.strip())
             docs = get_documents(web_path.strip(), model, embeddings)
             vectorstore = get_vectorstore(embeddings=embeddings, documents=docs)
     else:
-        logging.warning("Instantiating vectorstore without documents")
+        logging.debug("Instantiating vectorstore without documents")
         vectorstore = get_vectorstore(embeddings=embeddings)
 
     retriever = vectorstore.as_retriever(search_type="mmr")
@@ -180,13 +211,6 @@ def main(args):
         llm = Ollama(model=model, base_url=base_url, temperature=temperature)
         # retriever = multi_query_retriever_wrapper(retriever, llm)
         # retriever = embeddings_filter_retriever_wrapper(retriever, embeddings, similarity_threshold=0.6)
-
-        docs = retriever.get_relevant_documents(query=query)
-        for doc in docs:
-            logging.debug(doc)
-        if len(docs) == 0:
-            logging.warning("No context docs, exiting")
-            exit(0)
 
         rag_chain_from_docs = (
                 RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
@@ -199,13 +223,19 @@ def main(args):
             {"context": retriever, "question": RunnablePassthrough()}
         ).assign(answer=rag_chain_from_docs)
 
-        logging.info("Invoking chain...")
+        logging.debug("Invoking chain...")
         result = rag_chain_with_source.invoke(query)
-        logging.info(result["answer"])
-        logging.info("\n".join(doc.metadata["source"] for doc in result["context"]))
+        print(result["answer"])
+
+        if len(result["context"]) == 0:
+            logging.error("Context is empty, no matched documents")
+            exit(1)
+
+        if sources:
+            for doc in result["context"]:
+                print("source: "+doc.metadata["source"])
 
 
 if __name__ == '__main__':
     import sys
-
-    main(sys.argv[1:])
+    main(sys.argv)
