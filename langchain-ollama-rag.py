@@ -85,10 +85,9 @@ def get_documents(path, model_name, embeddings=None) -> List[Document]:
 
 
 def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> VectorStore:
-
     if documents is None:
         logging.debug("Attempting to instantiate chroma vector store from %s...",
-                     directory)
+                      directory)
         vectorstore = Chroma(embedding_function=embeddings,
                              persist_directory=directory,
                              collection_metadata={"hnsw:space": "cosine"})
@@ -140,18 +139,18 @@ def main(args):
     sources = False
 
     def usage(file=sys.stdout):
-        print("Usage: "+(args[0]), file=file)
+        print("Usage: " + (args[0]), file=file)
         print("\t--ingest\t\t\t\tread data locations line by line from STDIN and ingest", file=file)
         print("\t--query=<query>\t\t\t\tquery to ask model", file=file)
         print("\t--temperature=N\t\t\t\tmodel temperature for query (default: 0)", file=file)
-        print("\t--model=<model>\t\t\t\tmodel (default: \""+model+"\")", file=file)
+        print("\t--model=<model>\t\t\t\tmodel (default: \"" + model + "\")", file=file)
         print("\t--base-url=<base-url>\t\t\tURL for Ollama API (default: \"" + base_url + "\")", file=file)
         print("\t--log-level=<debug|info|warning>\tLog level (default: \"" + log_level + "\")", file=file)
         print("\t--langchain-verbose\t\t\tenable langchain verbose mode", file=file)
         print("\t--langchain-debug\t\t\tenable langchain debug mode", file=file)
         print("\t--sources\t\t\t\tprint locations of sources used as context", file=file)
         print("Examples:", file=file)
-        print("\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | "+args[0]+" --ingest`", file=file)
+        print("\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | " + args[0] + " --ingest`", file=file)
         print("\tquery:\t`" + args[0] + " --query=\"What is 802.1X?\"`", file=file)
 
     for arg in args[1:]:
@@ -177,7 +176,7 @@ def main(args):
             usage()
             exit(0)
         else:
-            print("Unknown argument: "+arg, file=sys.stderr)
+            print("Unknown argument: " + arg, file=sys.stderr)
             usage(sys.stderr)
             exit(1)
 
@@ -236,9 +235,10 @@ def main(args):
 
         if sources:
             for doc in result["context"]:
-                print("source: "+doc.metadata["source"])
+                print("source: " + doc.metadata["source"])
 
 
 if __name__ == '__main__':
     import sys
+
     main(sys.argv)
