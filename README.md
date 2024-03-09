@@ -7,7 +7,6 @@ Prerequisites
 -------------
 * Tested on Linux with an NVIDIA CUDA-capable card with at least 6GB of RAM
 * Tested on M2 Mac 32GB
-* [direnv](https://direnv.net/)
 
 Mac-specific setup instructions
 ----------------
@@ -51,12 +50,10 @@ General setup
 -------------
 ```shell
 $ cd /path/to/this/repo
-direnv: error /path/to/this/repo/.envrc is blocked. Run `direnv allow` to approve its content
-$ direnv allow
-direnv: loading /path/to/this/repo/.envrc
-direnv: export +ANONYMIZED_TELEMETRY +VIRTUAL_ENV ~PATH
-$ which python
-/path/to/this/repo/.direnv/python-3.X.Y/bin/python
+$ python3 -m venv venv
+$ . ./venv/bin/activate
+$ which python3
+/path/to/this/repo/venv/bin/python3
 $ pip install -r requirements.txt
 ...
 $ ./langchain-ollama.py --help
