@@ -18,12 +18,19 @@ from langchain_community.embeddings import OllamaEmbeddings
 # main
 from langchain_community.llms import Ollama
 # get_retriever
-from langchain_community.vectorstores import Chroma, LanceDB, FAISS
+from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.vectorstores import VectorStore
+# multi_query_retriever_wrapper
+from langchain.retrievers.multi_query import MultiQueryRetriever
+# get_prompt_local
+from string import Template
+# embeddings_filter_retriever_wrapper
+from langchain.retrievers.document_compressors import EmbeddingsFilter
+from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
 
 
 def get_prompt_hub(llama: bool) -> Any:
@@ -47,7 +54,6 @@ Question: {$question}
 Context: {context} 
 Answer: [/INST]
 """
-    from string import Template
     prompt = ChatPromptTemplate.from_template(Template(template).substitute({"question": question}))
     return prompt
 
@@ -99,16 +105,12 @@ def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> Vec
 
 
 def multi_query_retriever_wrapper(retriever, llm) -> Any:
-    from langchain.retrievers.multi_query import MultiQueryRetriever
     return MultiQueryRetriever.from_llm(
         retriever=retriever, llm=llm
     )
 
 
 def embeddings_filter_retriever_wrapper(retriever, embeddings, similarity_threshold=0.6) -> Any:
-    from langchain.retrievers.document_compressors import EmbeddingsFilter
-    from langchain.retrievers.contextual_compression import \
-        ContextualCompressionRetriever
     return ContextualCompressionRetriever(
         base_compressor=EmbeddingsFilter(embeddings=embeddings,
                                          similarity_threshold=similarity_threshold),
@@ -197,9 +199,9 @@ def main(args):
 
     if ingest:
         logging.debug("Adding documents to vectorstore")
-        for web_path in sys.stdin:
-            print("Web path: " + web_path.strip())
-            docs = get_documents(web_path.strip(), model, embeddings)
+        for path in sys.stdin:
+            logging.debug("Document path: " + path.strip())
+            docs = get_documents(path.strip(), model, embeddings)
             vectorstore = get_vectorstore(embeddings=embeddings, documents=docs)
     else:
         logging.debug("Instantiating vectorstore without documents")
