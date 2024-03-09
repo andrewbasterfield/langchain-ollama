@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # https://python.langchain.com/docs/use_cases/question_answering/quickstart
 # https://python.langchain.com/docs/integrations/llms/ollama
 # https://smith.langchain.com/hub/rlm/rag-prompt
@@ -7,6 +6,9 @@
 # https://api.python.langchain.com/en/latest/llms/langchain_community.llms.ollama.Ollama.html
 
 import logging
+import os
+import re
+
 from typing import Any, List, LiteralString
 
 # get_prompt
@@ -18,7 +20,6 @@ from langchain_community.embeddings import OllamaEmbeddings
 # main
 from langchain_community.llms import Ollama
 # get_retriever
-from chromadb.config import Settings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
@@ -32,6 +33,8 @@ from string import Template
 # embeddings_filter_retriever_wrapper
 from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers.contextual_compression import ContextualCompressionRetriever
+
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 
 def get_prompt_hub(llama: bool) -> Any:
@@ -59,7 +62,7 @@ Answer: [/INST]
     return prompt
 
 
-def get_documents(path, model_name, embeddings=None) -> List[Document]:
+def get_documents(path) -> List[Document]:
     # Only keep post title, headers, and content from the full HTML.
     # bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header",
     # "post-content")) bs4_strainer = bs4.SoupStrainer()
@@ -78,7 +81,7 @@ def get_documents(path, model_name, embeddings=None) -> List[Document]:
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
                                                    chunk_overlap=100,
                                                    length_function=len,
-                                                   add_start_index=False)
+                                                   add_start_index=True)
 
     split_docs = text_splitter.split_documents(docs)
     logging.info("Loaded & Splitted.")
@@ -87,22 +90,20 @@ def get_documents(path, model_name, embeddings=None) -> List[Document]:
 
 def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> VectorStore:
     if documents is None:
-        logging.debug("Attempting to instantiate chroma vector store from %s...",
-                      directory)
+        logging.info("Attempting to instantiate chroma vector store from %s...",
+                     directory)
         vectorstore = Chroma(embedding_function=embeddings,
                              persist_directory=directory,
-                             collection_metadata={"hnsw:space": "cosine"},
-                             client_settings=Settings(anonymized_telemetry=False))
+                             collection_metadata={"hnsw:space": "cosine"})
     else:
-        logging.debug(
-            "Attempting to instantiate chroma vector store (with documents) from %s...",
-            directory)
+        logging.info(
+            "Attempting to instantiate chroma vector store (with %d documents to add) from %s...",
+            len(documents), directory)
         vectorstore = Chroma.from_documents(documents=documents,
                                             embedding=embeddings,
                                             persist_directory=directory,
-                                            collection_metadata={"hnsw:space": "cosine"},
-                                            client_settings=Settings(anonymized_telemetry=False))
-    logging.debug("Instantiated vectorstore.")
+                                            collection_metadata={"hnsw:space": "cosine"})
+    logging.info("Instantiated vectorstore.")
     return vectorstore
 
 
@@ -129,17 +130,17 @@ def get_metadata_source(docs) -> LiteralString:
 
 
 def main(args):
-    import re
     ingest = False
     query = False
     temperature: int = 0
     embeddings_model = "nomic-embed-text"
     model = "llama2:7b"
     base_url = "http://localhost:11434"
-    log_level = "info"
+    log_level = "warning"
     langchain_verbose = False
     langchain_debug = False
     sources = False
+    db_location = "./chroma_db/"
 
     def usage(file=sys.stdout):
         print("Usage: " + (args[0]), file=file)
@@ -152,6 +153,7 @@ def main(args):
         print("\t--langchain-verbose\t\t\tenable langchain verbose mode", file=file)
         print("\t--langchain-debug\t\t\tenable langchain debug mode", file=file)
         print("\t--sources\t\t\t\tprint locations of sources used as context", file=file)
+        print("\t--db-location=<path>\t\tchroma database location (default: \"" + db_location + "\")", file=file)
         print("Examples:", file=file)
         print("\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | " + args[0] + " --ingest`", file=file)
         print("\tquery:\t`" + args[0] + " --query=\"What is 802.1X?\"`", file=file)
@@ -175,6 +177,8 @@ def main(args):
             langchain_debug = True
         elif arg == "--sources":
             sources = True
+        elif re.match("--db-location=(.+)$", arg):
+            db_location = re.findall("--db-location=(.+)$", arg)[0]
         elif arg == "--help":
             usage()
             exit(0)
@@ -199,23 +203,23 @@ def main(args):
 
     embeddings = OllamaEmbeddings(model=embeddings_model, base_url=base_url)
 
+    vectorstore = None
     if ingest:
-        logging.debug("Adding documents to vectorstore")
+        logging.info("Adding documents to vectorstore")
         for path in sys.stdin:
-            logging.debug("Document path: " + path.strip())
-            docs = get_documents(path.strip(), model, embeddings)
-            vectorstore = get_vectorstore(embeddings=embeddings, documents=docs)
-    else:
-        logging.debug("Instantiating vectorstore without documents")
-        vectorstore = get_vectorstore(embeddings=embeddings)
+            logging.info("Document path: " + path.strip())
+            docs = get_documents(path.strip())
+            vectorstore = get_vectorstore(embeddings=embeddings, documents=docs, directory=db_location)
+
+    if vectorstore is None:
+        logging.info("Instantiating vectorstore without documents")
+        vectorstore = get_vectorstore(embeddings=embeddings, directory=db_location)
 
     retriever = vectorstore.as_retriever(search_type="mmr")
 
     if query:
         prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in model))
         llm = Ollama(model=model, base_url=base_url, temperature=temperature)
-        # retriever = multi_query_retriever_wrapper(retriever, llm)
-        # retriever = embeddings_filter_retriever_wrapper(retriever, embeddings, similarity_threshold=0.6)
 
         rag_chain_from_docs = (
                 RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
@@ -228,7 +232,7 @@ def main(args):
             {"context": retriever, "question": RunnablePassthrough()}
         ).assign(answer=rag_chain_from_docs)
 
-        logging.debug("Invoking chain...")
+        logging.info("Invoking chain...")
         result = rag_chain_with_source.invoke(query)
         print(result["answer"])
 
@@ -238,7 +242,9 @@ def main(args):
 
         if sources:
             for doc in result["context"]:
-                print("source: " + doc.metadata["source"])
+                print("**** " + str(doc.metadata) + " ****")
+                print(doc.page_content)
+            print("****")
 
 
 if __name__ == '__main__':
