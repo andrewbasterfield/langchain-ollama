@@ -56,8 +56,8 @@ $ which python3
 /path/to/this/repo/venv/bin/python3
 $ pip install -r requirements.txt
 ...
-$ ./langchain-ollama.py --help
-Usage: ./langchain-ollama.py
+$ ./langchain-ollama-rag.py --help
+Usage: ./langchain-ollama-rag.py
 	--ingest				read data locations line by line from STDIN and ingest
 	--query=<query>				query to ask model
 	--temperature=N				model temperature for query (default: 0)
@@ -68,12 +68,12 @@ Usage: ./langchain-ollama.py
 	--langchain-debug			enable langchain debug mode
 	--sources				print locations of sources used as context
 Examples:
-	ingest:	`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | ./langchain-ollama.py --ingest`
-	query:	`./langchain-ollama.py --query="What is 802.1X?"`
+	ingest:	`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | ./langchain-ollama-rag.py --ingest`
+	query:	`./langchain-ollama-rag.py --query="What is 802.1X?"`
 $ cd training
 $ ./fetch.sh # pulls down the Linux documentation project in plaintext, approx 35M
 $ cd ..
-$ ls training/*.txt | ./langchain-ollama.py --ingest
+$ ls training/*.txt | ./langchain-ollama-rag.py --ingest
 ...
-$ ./langchain-ollama.py --query="What is NIS+?" --sources
+$ ./langchain-ollama-rag.py --query="What is NIS+?" --sources
 ```
