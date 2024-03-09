@@ -18,6 +18,7 @@ from langchain_community.embeddings import OllamaEmbeddings
 # main
 from langchain_community.llms import Ollama
 # get_retriever
+from chromadb.config import Settings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
@@ -90,7 +91,8 @@ def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> Vec
                       directory)
         vectorstore = Chroma(embedding_function=embeddings,
                              persist_directory=directory,
-                             collection_metadata={"hnsw:space": "cosine"})
+                             collection_metadata={"hnsw:space": "cosine"},
+                             client_settings=Settings(anonymized_telemetry=False))
     else:
         logging.debug(
             "Attempting to instantiate chroma vector store (with documents) from %s...",
@@ -98,7 +100,8 @@ def get_vectorstore(embeddings, documents=None, directory="./chroma_db/") -> Vec
         vectorstore = Chroma.from_documents(documents=documents,
                                             embedding=embeddings,
                                             persist_directory=directory,
-                                            collection_metadata={"hnsw:space": "cosine"})
+                                            collection_metadata={"hnsw:space": "cosine"},
+                                            client_settings=Settings(anonymized_telemetry=False))
     logging.debug("Instantiated vectorstore.")
     return vectorstore
 
@@ -230,7 +233,7 @@ def main(args):
         print(result["answer"])
 
         if len(result["context"]) == 0:
-            logging.error("Context is empty, no matched documents")
+            logging.error("Context is empty, no relevant documents found")
             exit(1)
 
         if sources:
