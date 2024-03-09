@@ -7,7 +7,8 @@
 
 import logging
 import os
-import re
+import argparse
+import sys
 
 from typing import Any, List, LiteralString
 
@@ -47,17 +48,13 @@ def get_prompt_hub(llama: bool) -> Any:
 
 def get_prompt_local(llama: bool, question: object = "question") -> ChatPromptTemplate:
     if llama:
-        template = """[INST]<<SYS>> You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.<</SYS>> 
-Question: {$question} 
-Context: {context} 
-Answer:
-"""
+        template = """[INST]<<SYS>> You are an assistant for question-answering tasks. Use the following pieces of 
+        retrieved context to answer the question. If you don't know the answer, just say that you don't know.<</SYS>> 
+        Question: {$question} Context: {context} Answer:"""
     else:
-        template = """You are an assistant for question-answering tasks. Use only the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know.
-Question: {$question} 
-Context: {context} 
-Answer: [/INST]
-"""
+        template = """You are an assistant for question-answering tasks. Use only the following pieces of retrieved 
+        context to answer the question. If you don't know the answer, just say that you don't know. Question: {
+        $question} Context: {context} Answer: [/INST]"""
     prompt = ChatPromptTemplate.from_template(Template(template).substitute({"question": question}))
     return prompt
 
@@ -84,7 +81,7 @@ def get_documents(path) -> List[Document]:
                                                    add_start_index=True)
 
     split_docs = text_splitter.split_documents(docs)
-    logging.info("Loaded & Splitted.")
+    logging.info("Loaded & Split.")
     return split_docs
 
 
@@ -129,97 +126,52 @@ def get_metadata_source(docs) -> LiteralString:
     return "\n".join(doc.metadata["source"] for doc in docs)
 
 
-def main(args):
-    ingest = False
-    query = False
-    temperature: int = 0
-    embeddings_model = "nomic-embed-text"
-    model = "llama2:7b"
-    base_url = "http://localhost:11434"
-    log_level = "warning"
-    langchain_verbose = False
-    langchain_debug = False
-    sources = False
-    db_location = "./chroma_db/"
+def main():
+    parser = argparse.ArgumentParser(prog=sys.argv[0], formatter_class=argparse.RawTextHelpFormatter,
+                                     epilog="""examples:
+\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | %(prog)s --ingest`
+\tquery:\t`%(prog)s --query=\"What is 802.1X?\"`"
+""")
+    parser.add_argument("--ingest", action='store_true', help="read data locations line by line from STDIN and ingest")
+    parser.add_argument("--query", help="query to ask model")
+    parser.add_argument("--temperature", default=0, help="model temperature for query (default: %(default)s)")
+    parser.add_argument("--generative-model", default="llama2:7b", help="model used for generation"
+                                                                        " (default: %(default)s)")
+    parser.add_argument("--embeddings-model", default="nomic-embed-text", help="model used for creating the "
+                                                                               "embeddings (default: %(default)s)")
+    parser.add_argument("--ollama-url", default="http://localhost:11434", help="URL for Ollama API"
+                                                                               " (default: %(default)s)")
+    parser.add_argument("--log-level", default="warning", help="Log threshold (default: %(default)s)")
+    parser.add_argument("--sources", action='store_true', help="Show sources provided in context with query result")
+    parser.add_argument("--db-location", default="./chroma_db/", help="Location of the database (default: %(default)s)")
+    args = parser.parse_args()
 
-    def usage(file=sys.stdout):
-        print("Usage: " + (args[0]), file=file)
-        print("\t--ingest\t\t\t\tread data locations line by line from STDIN and ingest", file=file)
-        print("\t--query=<query>\t\t\t\tquery to ask model", file=file)
-        print("\t--temperature=N\t\t\t\tmodel temperature for query (default: 0)", file=file)
-        print("\t--model=<model>\t\t\t\tmodel (default: \"" + model + "\")", file=file)
-        print("\t--base-url=<base-url>\t\t\tURL for Ollama API (default: \"" + base_url + "\")", file=file)
-        print("\t--log-level=<debug|info|warning>\tLog level (default: \"" + log_level + "\")", file=file)
-        print("\t--langchain-verbose\t\t\tenable langchain verbose mode", file=file)
-        print("\t--langchain-debug\t\t\tenable langchain debug mode", file=file)
-        print("\t--sources\t\t\t\tprint locations of sources used as context", file=file)
-        print("\t--db-location=<path>\t\tchroma database location (default: \"" + db_location + "\")", file=file)
-        print("Examples:", file=file)
-        print("\tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | " + args[0] + " --ingest`", file=file)
-        print("\tquery:\t`" + args[0] + " --query=\"What is 802.1X?\"`", file=file)
-
-    for arg in args[1:]:
-        if arg == "--ingest":
-            ingest = True
-        elif re.match("--query=(.+)$", arg):
-            query = re.findall("--query=(.+)$", arg)[0]
-        elif re.match("--temperature=(\\d+)", arg):
-            temperature = re.findall("--temperature=(\\d+)", arg)[0]
-        elif re.match("--model=(\\w+)", arg):
-            model = re.findall("--model=(\\w+)", arg)[0]
-        elif re.match("--base-url=(\\S+)", arg):
-            base_url = re.findall("--base-url=(\\S+)", arg)[0]
-        elif re.match("--log-level=(\\w+)", arg):
-            log_level = re.findall("--log-level=(\\w+)", arg)[0]
-        elif arg == "--langchain-verbose":
-            langchain_verbose = True
-        elif arg == "--langchain-debug":
-            langchain_debug = True
-        elif arg == "--sources":
-            sources = True
-        elif re.match("--db-location=(.+)$", arg):
-            db_location = re.findall("--db-location=(.+)$", arg)[0]
-        elif arg == "--help":
-            usage()
-            exit(0)
-        else:
-            print("Unknown argument: " + arg, file=sys.stderr)
-            usage(sys.stderr)
-            exit(1)
-
-    if (not ingest) and (not query):
-        print("Need at least one of --ingest or --query", file=sys.stderr)
-        usage(sys.stderr)
+    if (not args.ingest) and (not args.query):
+        print("\nNeed at least one of --ingest or --query\n", file=sys.stderr)
+        parser.print_help(file=sys.stderr)
         exit(1)
 
-    logging.basicConfig(level=getattr(logging, log_level.upper()))
-    from langchain.globals import set_debug, set_verbose
+    logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
-    if langchain_verbose:
-        set_verbose(False)
-
-    if langchain_debug:
-        set_debug(False)
-
-    embeddings = OllamaEmbeddings(model=embeddings_model, base_url=base_url)
+    embeddings = OllamaEmbeddings(model=args.embeddings_model, base_url=args.ollama_url)
 
     vectorstore = None
-    if ingest:
+    if args.ingest:
         logging.info("Adding documents to vectorstore")
         for path in sys.stdin:
             logging.info("Document path: " + path.strip())
             docs = get_documents(path.strip())
-            vectorstore = get_vectorstore(embeddings=embeddings, documents=docs, directory=db_location)
+            vectorstore = get_vectorstore(embeddings=embeddings, documents=docs, directory=args.db_location)
 
     if vectorstore is None:
         logging.info("Instantiating vectorstore without documents")
-        vectorstore = get_vectorstore(embeddings=embeddings, directory=db_location)
+        vectorstore = get_vectorstore(embeddings=embeddings, directory=args.db_location)
 
     retriever = vectorstore.as_retriever(search_type="mmr")
 
-    if query:
-        prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in model))
-        llm = Ollama(model=model, base_url=base_url, temperature=temperature)
+    if args.query:
+        prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in args.generative_model))
+        llm = Ollama(model=args.generative_model, base_url=args.ollama_url, temperature=args.temperature)
 
         rag_chain_from_docs = (
                 RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
@@ -233,14 +185,14 @@ def main(args):
         ).assign(answer=rag_chain_from_docs)
 
         logging.info("Invoking chain...")
-        result = rag_chain_with_source.invoke(query)
+        result = rag_chain_with_source.invoke(args.query)
         print(result["answer"])
 
         if len(result["context"]) == 0:
-            logging.error("Context is empty, no relevant documents found")
+            logging.error("Context was empty, no relevant documents found")
             exit(1)
 
-        if sources:
+        if args.sources:
             for doc in result["context"]:
                 print("**** " + str(doc.metadata) + " ****")
                 print(doc.page_content)
@@ -248,6 +200,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    import sys
-
-    main(sys.argv)
+    main()
