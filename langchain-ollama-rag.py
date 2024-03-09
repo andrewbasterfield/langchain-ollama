@@ -50,11 +50,11 @@ def get_prompt_local(llama: bool, question: object = "question") -> ChatPromptTe
     if llama:
         template = """[INST]<<SYS>> You are an assistant for question-answering tasks. Use the following pieces of 
         retrieved context to answer the question. If you don't know the answer, just say that you don't know.<</SYS>> 
-        Question: {$question} Context: {context} Answer:"""
+        Question: {question} Context: {context} Answer: [/INST]"""
     else:
-        template = """You are an assistant for question-answering tasks. Use only the following pieces of retrieved 
-        context to answer the question. If you don't know the answer, just say that you don't know. Question: {
-        $question} Context: {context} Answer: [/INST]"""
+        template = """You are an assistant for question-answering tasks. Use only the following pieces of
+        retrieved context to answer the question. If you don't know the answer, just say that you don't know.
+        Question: {question} Context: {context} Answer:"""
     prompt = ChatPromptTemplate.from_template(Template(template).substitute({"question": question}))
     return prompt
 
@@ -135,12 +135,14 @@ def main():
     parser.add_argument("--ingest", action='store_true', help="read data locations line by line from STDIN and ingest")
     parser.add_argument("--query", help="query to ask model")
     parser.add_argument("--temperature", default=0, help="model temperature for query (default: %(default)s)")
-    parser.add_argument("--generative-model", default="llama2:7b", help="model used for generation"
-                                                                        " (default: %(default)s)")
-    parser.add_argument("--embeddings-model", default="nomic-embed-text", help="model used for creating the "
-                                                                               "embeddings (default: %(default)s)")
-    parser.add_argument("--ollama-url", default="http://localhost:11434", help="URL for Ollama API"
-                                                                               " (default: %(default)s)")
+    parser.add_argument("--embeddings-model", default="nomic-embed-text",
+                        help="model used for creating the embeddings (default: %(default)s)")
+    parser.add_argument("--ollama-embeddings-url", default="http://localhost:11434",
+                        help="URL for Ollama API for embeddings (default: %(default)s)")
+    parser.add_argument("--generative-model", default="llama2:7b",
+                        help="model used for generation (default: %(default)s)")
+    parser.add_argument("--ollama-generation-url", default="http://localhost:11434",
+                        help="URL for Ollama API for generation (default: %(default)s)")
     parser.add_argument("--log-level", default="warning", help="Log threshold (default: %(default)s)")
     parser.add_argument("--sources", action='store_true', help="Show sources provided in context with query result")
     parser.add_argument("--db-location", default="./chroma_db/", help="Location of the database (default: %(default)s)")
@@ -153,7 +155,7 @@ def main():
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
-    embeddings = OllamaEmbeddings(model=args.embeddings_model, base_url=args.ollama_url)
+    embeddings = OllamaEmbeddings(model=args.embeddings_model, base_url=args.ollama_embeddings_url)
 
     vectorstore = None
     if args.ingest:
@@ -171,7 +173,7 @@ def main():
 
     if args.query:
         prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in args.generative_model))
-        llm = Ollama(model=args.generative_model, base_url=args.ollama_url, temperature=args.temperature)
+        llm = Ollama(model=args.generative_model, base_url=args.ollama_generation_url, temperature=args.temperature)
 
         rag_chain_from_docs = (
                 RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
