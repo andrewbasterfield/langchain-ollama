@@ -22,6 +22,7 @@ from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.llms import Ollama
 # get_retriever
 from langchain_community.vectorstores import Chroma
+from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -59,11 +60,12 @@ def get_prompt_local(llama: bool, question: object = "question") -> ChatPromptTe
     return prompt
 
 
-def get_documents(path) -> List[Document]:
+def get_loader(path) -> BaseLoader:
     # Only keep post title, headers, and content from the full HTML.
     # bs4_strainer = bs4.SoupStrainer(class_=("post-title", "post-header",
     # "post-content")) bs4_strainer = bs4.SoupStrainer()
 
+    logging.info("Loading & Splitting %s...", path)
     if path.startswith("http://") or path.startswith("https://"):
         loader = WebBaseLoader(
             web_paths=(path,),
@@ -72,7 +74,11 @@ def get_documents(path) -> List[Document]:
     else:
         loader = TextLoader(path, autodetect_encoding=True)
 
-    logging.info("Loading & Splitting %s...", path)
+    return loader
+
+
+def get_documents(loader: BaseLoader) -> List[Document]:
+
     docs = loader.load()
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
@@ -162,7 +168,8 @@ def main():
         logging.info("Adding documents to vectorstore")
         for path in sys.stdin:
             logging.info("Document path: " + path.strip())
-            docs = get_documents(path.strip())
+            loader = get_loader(path.strip())
+            docs = get_documents(loader)
             vectorstore = get_vectorstore(embeddings=embeddings, documents=docs, directory=args.db_location)
 
     if vectorstore is None:
