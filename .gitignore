@@ -1,4 +1,4 @@
 .direnv
 data
 chroma_db
-training/
+ingest/*.txt

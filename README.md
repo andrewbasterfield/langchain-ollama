@@ -57,23 +57,37 @@ $ which python3
 $ pip install -r requirements.txt
 ...
 $ ./langchain-ollama-rag.py --help
-Usage: ./langchain-ollama-rag.py
-	--ingest				read data locations line by line from STDIN and ingest
-	--query=<query>				query to ask model
-	--temperature=N				model temperature for query (default: 0)
-	--model=<model>				model (default: "llama2:7b")
-	--base-url=<base-url>			URL for Ollama API (default: "http://localhost:11434")
-	--log-level=<debug|info|warning>	Log level (default: "info")
-	--langchain-verbose			enable langchain verbose mode
-	--langchain-debug			enable langchain debug mode
-	--sources				print locations of sources used as context
-Examples:
+usage: ./langchain-ollama-rag.py [-h] [--ingest] [--query QUERY] [--temperature TEMPERATURE] [--embeddings-model EMBEDDINGS_MODEL] [--ollama-embeddings-url OLLAMA_EMBEDDINGS_URL] [--generative-model GENERATIVE_MODEL] [--ollama-generation-url OLLAMA_GENERATION_URL] [--log-level LOG_LEVEL] [--sources]
+                                 [--db-location DB_LOCATION]
+
+options:
+  -h, --help            show this help message and exit
+  --ingest              read data locations line by line from STDIN and ingest
+  --query QUERY         query to ask model
+  --temperature TEMPERATURE
+                        model temperature for query (default: 0)
+  --embeddings-model EMBEDDINGS_MODEL
+                        model used for creating the embeddings (default: nomic-embed-text)
+  --ollama-embeddings-url OLLAMA_EMBEDDINGS_URL
+                        URL for Ollama API for embeddings (default: http://localhost:11434)
+  --generative-model GENERATIVE_MODEL
+                        model used for generation (default: llama2:7b)
+  --ollama-generation-url OLLAMA_GENERATION_URL
+                        URL for Ollama API for generation (default: http://localhost:11434)
+  --log-level LOG_LEVEL
+                        Log threshold (default: warning)
+  --sources             Show sources provided in context with query result
+  --db-location DB_LOCATION
+                        Location of the database (default: ./chroma_db/)
+
+examples:
 	ingest:	`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | ./langchain-ollama-rag.py --ingest`
-	query:	`./langchain-ollama-rag.py --query="What is 802.1X?"`
-$ cd training
+	query:	`./langchain-ollama-rag.py --query="What is 802.1X?"`"
+
+$ cd ingest
 $ ./fetch.sh # pulls down the Linux documentation project in plaintext, approx 35M
 $ cd ..
-$ ls training/*.txt | ./langchain-ollama-rag.py --ingest
+$ ls ingest/*.txt | ./langchain-ollama-rag.py --ingest
 ...
 $ ./langchain-ollama-rag.py --query="What is NIS+?" --sources
 ```

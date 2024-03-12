@@ -136,7 +136,7 @@ def main():
     parser = argparse.ArgumentParser(prog=sys.argv[0], formatter_class=argparse.RawTextHelpFormatter,
                                      epilog="""examples:
 \tingest:\t`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | %(prog)s --ingest`
-\tquery:\t`%(prog)s --query=\"What is 802.1X?\"`"
+\tquery:\t`%(prog)s --query=\"What is 802.1X?\"`
 """)
     parser.add_argument("--ingest", action='store_true', help="read data locations line by line from STDIN and ingest")
     parser.add_argument("--query", help="query to ask model")
