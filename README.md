@@ -82,7 +82,7 @@ options:
 
 examples:
 	ingest:	`echo https://tldp.org/HOWTO/html_single/8021X-HOWTO/ | ./langchain-ollama-rag.py --ingest`
-	query:	`./langchain-ollama-rag.py --query="What is 802.1X?"`"
+	query:	`./langchain-ollama-rag.py --query="What is 802.1X?"`
 
 $ cd ingest
 $ ./fetch.sh # pulls down the Linux documentation project in plaintext, approx 35M
