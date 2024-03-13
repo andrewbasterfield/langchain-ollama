@@ -16,7 +16,7 @@ from typing import Any, List, LiteralString
 from langchain import hub
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 # get_documents
-from langchain_community.document_loaders import WebBaseLoader, TextLoader
+from langchain_community.document_loaders import WebBaseLoader, TextLoader, PyPDFLoader
 from langchain_community.embeddings import OllamaEmbeddings
 # main
 from langchain_community.llms import Ollama
@@ -66,7 +66,9 @@ def get_loader(path) -> BaseLoader:
     # "post-content")) bs4_strainer = bs4.SoupStrainer()
 
     logging.info("Loading & Splitting %s...", path)
-    if path.startswith("http://") or path.startswith("https://"):
+    if path.upper().endswith(".PDF"):
+        loader = PyPDFLoader(path)
+    elif path.startswith("http://") or path.startswith("https://"):
         loader = WebBaseLoader(
             web_paths=(path,),
             # bs_kwargs={"parse_only": bs4_strainer},
