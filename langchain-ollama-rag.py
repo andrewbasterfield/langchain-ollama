@@ -24,9 +24,10 @@ from langchain_community.llms import Ollama
 from langchain_community.vectorstores import Chroma
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document
+from langchain_core.language_models import BaseLLM
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableSerializable
 from langchain_core.vectorstores import VectorStore
 # multi_query_retriever_wrapper
 from langchain.retrievers.multi_query import MultiQueryRetriever
@@ -80,7 +81,6 @@ def get_loader(path) -> BaseLoader:
 
 
 def get_documents(loader: BaseLoader) -> List[Document]:
-
     docs = loader.load()
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000,
@@ -182,21 +182,20 @@ def main():
 
     if args.query:
         prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in args.generative_model))
-        llm = Ollama(model=args.generative_model, base_url=args.ollama_generation_url, temperature=args.temperature)
+        llm: BaseLLM = Ollama(model=args.generative_model, base_url=args.ollama_generation_url,
+                              temperature=args.temperature)
 
-        rag_chain_from_docs = (
+        rag_chain_with_sources: RunnableSerializable = RunnableParallel(
+            {"context": retriever, "question": RunnablePassthrough()}
+        ).assign(answer=(
                 RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
                 | prompt
                 | llm
                 | StrOutputParser()
-        )
-
-        rag_chain_with_source = RunnableParallel(
-            {"context": retriever, "question": RunnablePassthrough()}
-        ).assign(answer=rag_chain_from_docs)
+        ))
 
         logging.info("Invoking chain...")
-        result = rag_chain_with_source.invoke(args.query)
+        result = rag_chain_with_sources.invoke(args.query)
         print(result["answer"])
 
         if len(result["context"]) == 0:
