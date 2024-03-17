@@ -188,13 +188,18 @@ def main():
                               temperature=args.temperature)
 
         # First instantiate Runnable with {"question": <invoke arg>, raw_docs: <retriever callback (Runnable)>}
-        # Then build context from formatting raw_docs. itemgetter is a python callable and RunnableLambda convert to
-        # LangChain Runnable. Then feed through a normal RAG chain.
+        # Then build context from formatting raw_docs. itemgetter is a python callable and RunnableLambda convert
+        # callable to LangChain Runnable. Then feed through a normal RAG chain.
+        # assign() on the chain and RunnablePassthrough.assign() in the chain are equivalent
         rag_chain_with_sources: RunnableSerializable = (
             RunnableParallel(question=RunnablePassthrough(), raw_docs=retriever)
             # .assign(context=itemgetter("raw_docs") | RunnableLambda(format_docs))
-            .assign(context=(lambda obj: format_docs(obj["raw_docs"])))
-            .assign(answer=prompt | llm | StrOutputParser()))
+            # .assign(context=lambda obj: format_docs(obj["raw_docs"]))
+            # .assign(answer=prompt | llm | StrOutputParser()))
+            .assign(answer=(
+                RunnablePassthrough.assign(context=lambda obj: format_docs(obj["raw_docs"]))
+                | prompt | llm | StrOutputParser()
+            )))
 
         logging.info("Invoking chain...")
         result = rag_chain_with_sources.invoke(args.query)
