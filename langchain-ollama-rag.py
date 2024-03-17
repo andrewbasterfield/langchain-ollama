@@ -9,11 +9,13 @@ import logging
 import os
 import argparse
 import sys
+from operator import itemgetter
 
 from typing import Any, List, LiteralString
 
 # get_prompt
 from langchain import hub
+from langchain.globals import set_verbose, set_debug
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 # get_documents
 from langchain_community.document_loaders import WebBaseLoader, TextLoader, PyPDFLoader
@@ -27,7 +29,7 @@ from langchain_core.documents import Document
 from langchain_core.language_models import BaseLLM
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableSerializable
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableSerializable, RunnableLambda
 from langchain_core.vectorstores import VectorStore
 # multi_query_retriever_wrapper
 from langchain.retrievers.multi_query import MultiQueryRetriever
@@ -48,7 +50,7 @@ def get_prompt_hub(llama: bool) -> Any:
     return prompt
 
 
-def get_prompt_local(llama: bool, question: object = "question") -> ChatPromptTemplate:
+def get_prompt_local(llama: bool, question_token: str = "question") -> ChatPromptTemplate:
     if llama:
         template = """[INST]<<SYS>> You are an assistant for question-answering tasks. Use the following pieces of 
         retrieved context to answer the question. If you don't know the answer, just say that you don't know.<</SYS>> 
@@ -57,8 +59,7 @@ def get_prompt_local(llama: bool, question: object = "question") -> ChatPromptTe
         template = """You are an assistant for question-answering tasks. Use only the following pieces of
         retrieved context to answer the question. If you don't know the answer, just say that you don't know.
         Question: {question} Context: {context} Answer:"""
-    prompt = ChatPromptTemplate.from_template(Template(template).substitute({"question": question}))
-    return prompt
+    return ChatPromptTemplate.from_template(Template(template).substitute({"question": question_token}))
 
 
 def get_loader(path) -> BaseLoader:
@@ -127,6 +128,7 @@ def embeddings_filter_retriever_wrapper(retriever, embeddings, similarity_thresh
 
 
 def format_docs(docs) -> LiteralString:
+    """Convert Documents to a single string.:"""
     return "\n\n".join(doc.page_content for doc in docs)
 
 
@@ -185,25 +187,25 @@ def main():
         llm: BaseLLM = Ollama(model=args.generative_model, base_url=args.ollama_generation_url,
                               temperature=args.temperature)
 
-        rag_chain_with_sources: RunnableSerializable = RunnableParallel(
-            {"context": retriever, "question": RunnablePassthrough()}
-        ).assign(answer=(
-                RunnablePassthrough.assign(context=(lambda d: format_docs(d["context"])))
-                | prompt
-                | llm
-                | StrOutputParser()
-        ))
+        # First instantiate Runnable with {"question": <invoke arg>, raw_docs: <retriever callback (Runnable)>}
+        # Then build context from formatting raw_docs. itemgetter is a python callable and RunnableLambda convert to
+        # LangChain Runnable. Then feed through a normal RAG chain.
+        rag_chain_with_sources: RunnableSerializable = (
+            RunnableParallel(question=RunnablePassthrough(), raw_docs=retriever)
+            # .assign(context=itemgetter("raw_docs") | RunnableLambda(format_docs))
+            .assign(context=(lambda obj: format_docs(obj["raw_docs"])))
+            .assign(answer=prompt | llm | StrOutputParser()))
 
         logging.info("Invoking chain...")
         result = rag_chain_with_sources.invoke(args.query)
         print(result["answer"])
 
-        if len(result["context"]) == 0:
+        if len(result["raw_docs"]) == 0:
             logging.error("Context was empty, no relevant documents found")
             exit(1)
 
         if args.sources:
-            for doc in result["context"]:
+            for doc in result["raw_docs"]:
                 print("**** " + str(doc.metadata) + " ****")
                 print(doc.page_content)
             print("****")
