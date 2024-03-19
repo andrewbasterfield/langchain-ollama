@@ -160,7 +160,7 @@ def main():
     parser.add_argument("--ingest-chunk-size", default=1000, help="ingestion chunk size (default: %(default)s)")
     parser.add_argument("--ingest-overlap", default=100, help="ingestion chunk overlap size (default: %(default)s)")
     parser.add_argument("--query", help="query to ask model")
-    parser.add_argument("--fetch-chunks", default=40, help="num chunks to get from database (default: %(default)s)")
+    parser.add_argument("--fetch-chunks", default=10, help="num chunks to get from database (default: %(default)s)")
     parser.add_argument("--temperature", default=0, help="model temperature for query (default: %(default)s)")
     parser.add_argument("--embeddings-model", default="nomic-embed-text",
                         help="model used for creating the embeddings (default: %(default)s)")
@@ -183,8 +183,8 @@ def main():
         exit(1)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
+    set_debug(args.enable_verbose or args.enable_debug)
     set_verbose(args.enable_verbose)
-    set_debug(args.enable_debug)
 
     embeddings = OllamaEmbeddings(model=args.embeddings_model, base_url=args.ollama_embeddings_url)
 
@@ -194,7 +194,7 @@ def main():
         for path in sys.stdin:
             logging.info("Document path: " + path.strip())
             loader = get_loader(path.strip())
-            docs = get_documents(loader=loader, chunk_size=args.ingest_chunk_size, chunk_overlap=args.ingest_overlap)
+            docs = get_documents(loader=loader, chunk_size=int(args.ingest_chunk_size), chunk_overlap=int(args.ingest_overlap))
             vectorstore = get_vectorstore(embeddings=embeddings, documents=docs, directory=args.db_location)
 
     if vectorstore is None:
