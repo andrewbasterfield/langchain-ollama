@@ -19,6 +19,7 @@ click==8.1.7
 coloredlogs==15.0.1
 dataclasses-json==0.6.4
 Deprecated==1.2.14
+Dumper==1.2.0
 fastapi==0.110.0
 filelock==3.13.1
 flatbuffers==24.3.7
