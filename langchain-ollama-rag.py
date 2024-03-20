@@ -26,7 +26,7 @@ from langchain.retrievers.document_compressors import EmbeddingsFilter
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 # get_documents
-from langchain_community.document_loaders import WebBaseLoader, TextLoader, PyPDFLoader
+from langchain_community.document_loaders import WebBaseLoader, TextLoader, PyMuPDFLoader
 from langchain_community.embeddings import OllamaEmbeddings
 # main
 from langchain_community.llms import Ollama
@@ -72,7 +72,7 @@ def get_loader(path) -> BaseLoader:
 
     logging.info("Loading & Splitting %s...", path)
     if path.upper().endswith(".PDF"):
-        loader = PyPDFLoader(path)
+        loader = PyMuPDFLoader(path)
     elif path.startswith("http://") or path.startswith("https://"):
         loader = WebBaseLoader(
             web_paths=(path,),
@@ -160,7 +160,7 @@ def main():
     parser.add_argument("--ingest-chunk-size", default=1000, help="ingestion chunk size (default: %(default)s)")
     parser.add_argument("--ingest-overlap", default=100, help="ingestion chunk overlap size (default: %(default)s)")
     parser.add_argument("--query", help="query to ask model")
-    parser.add_argument("--fetch-chunks", default=10, help="num chunks to get from database (default: %(default)s)")
+    parser.add_argument("--fetch-snippets", default=10, help="num doc snippets to get from database (default: %(default)s)")
     parser.add_argument("--temperature", default=0, help="model temperature for query (default: %(default)s)")
     parser.add_argument("--embeddings-model", default="nomic-embed-text",
                         help="model used for creating the embeddings (default: %(default)s)")
@@ -201,7 +201,7 @@ def main():
         logging.info("Instantiating vectorstore without documents")
         vectorstore = get_vectorstore(embeddings=embeddings, directory=args.db_location)
 
-    retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": int(args.fetch_chunks)})
+    retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": int(args.fetch_snippets)})
 
     if args.query:
         prompt: ChatPromptTemplate = get_prompt_local(llama=("llama" in args.generative_model))
@@ -228,15 +228,15 @@ def main():
         print(result["answer"])
 
         if len(result["raw_docs"]) == 0:
-            logging.error("Context was empty, no relevant documents found")
+            logging.error("Context was empty, no relevant document snippets found")
             exit(1)
 
-        logging.info("Context had %d docs", len(result["raw_docs"]))
         if args.sources:
             for doc in result["raw_docs"]:
                 print("**** " + str(doc.metadata) + " ****")
                 print(doc.page_content)
             print("****")
+        logging.info("Context had %d document snippets", len(result["raw_docs"]))
 
 
 if __name__ == '__main__':
